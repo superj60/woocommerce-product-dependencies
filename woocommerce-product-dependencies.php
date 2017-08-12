@@ -190,6 +190,9 @@ class WC_Product_Dependencies {
 
 		if ( WC_PD_Core_Compatibility::is_wc_version_gte_2_7() ) {
 			$tied_product_ids = $product->get_meta( '_tied_products', true );
+			$tied_category_ids = $product->get_meta("_tied_categories", true);
+			$cart_contents = WC()->cart->cart_contents;
+
 			$dependency_type  = absint( $product->get_meta( '_dependency_type', true ) );
 		} else {
 			$tied_product_ids = (array) get_post_meta( $product_id, '_tied_products', true );
@@ -208,8 +211,7 @@ class WC_Product_Dependencies {
 				}
 			}
 		}
-
-		if ( ! empty( $tied_products ) ) {
+		if ( ! empty( $tied_products ) || ! empty( $tied_category_ids ) ) {
 
 			$tied_product_ids = array_keys( $tied_products );
 
@@ -221,8 +223,23 @@ class WC_Product_Dependencies {
 				foreach ( $cart_contents as $cart_item ) {
 					$product_id   = $cart_item[ 'product_id' ];
 					$variation_id = $cart_item[ 'variation_id' ];
+					// if product is simple
+					$product_categories = array( );
+					if($cart_item['data'])
+					{
+						$cart_item_data = $cart_item['data'];
+						$product_categories = $cart_item_data->category_ids;
+					}
 					if ( in_array( $product_id, $tied_product_ids ) || in_array( $variation_id, $tied_product_ids ) ) {
 						return true;
+					}
+					else {
+						foreach ($product_categories as $product_category) {
+							if( in_array($product_category, $tied_category_ids))
+							{
+								return true;
+							}
+						}
 					}
 				}
 			}
@@ -252,9 +269,7 @@ class WC_Product_Dependencies {
 				}
 
 			} else {
-
-				$merged_titles = WC_PD_Helpers::merge_product_titles( $tied_products );
-
+				$merged_titles = WC_PD_Helpers::merge_product_titles( $tied_products, $tied_category_ids );
 				$msg = '';
 
 				if ( $dependency_type === 1 ) {
@@ -316,6 +331,7 @@ class WC_Product_Dependencies {
 
 		if ( WC_PD_Core_Compatibility::is_wc_version_gte_2_7() ) {
 			$tied_products   = $product_object->get_meta( '_tied_products', true );
+			$tied_categories = $product_object->get_meta( '_tied_categories', true );
 			$dependency_type = $product_object->get_meta( '_dependency_type', true );
 		} else {
 			$tied_products   = get_post_meta( $post->ID, '_tied_products', true );
@@ -338,6 +354,57 @@ class WC_Product_Dependencies {
 				}
 			}
 		}
+
+		//get category list
+
+		$category_list = array();
+
+		$taxonomy     = 'product_cat';
+	    $orderby      = 'name';
+		$show_count   = 0;      // 1 for yes, 0 for no
+		$pad_counts   = 0;      // 1 for yes, 0 for no
+		$hierarchical = 1;      // 1 for yes, 0 for no
+		$title        = '';
+		$empty        = 0;
+
+		$args = array(
+				'taxonomy'     => $taxonomy,
+				'orderby'      => $orderby,
+				'show_count'   => $show_count,
+				'pad_counts'   => $pad_counts,
+				'hierarchical' => $hierarchical,
+				'title_li'     => $title,
+				'hide_empty'   => $empty
+		);
+		$all_categories = get_categories( $args );
+		foreach ($all_categories as $cat) {
+		   if($cat->category_parent == 0) {
+			   $category_id = $cat->term_id;
+			   $category_name = $cat->name;
+			   $category = array("id" => $category_id, "name" => $category_name, "sub_cats" => array());
+
+			   $args2 = array(
+					   'taxonomy'     => $taxonomy,
+					   'child_of'     => 0,
+					   'parent'       => $category_id,
+					   'orderby'      => $orderby,
+					   'show_count'   => $show_count,
+					   'pad_counts'   => $pad_counts,
+					   'hierarchical' => $hierarchical,
+					   'title_li'     => $title,
+					   'hide_empty'   => $empty
+			   );
+			   $sub_cats = get_categories( $args2 );
+			   if($sub_cats) {
+				   foreach($sub_cats as $sub_category) {
+					   $sub_id = $sub_category->term_id;
+					   $sub_name = $sub_category->name;
+					   $category["sub_cats"][] = array("id" => $sub_id, "name" => $sub_name);
+				   }
+			   }
+			   $category_list[] = $category;
+		   }
+	    }
 
 		?>
 		<div id="tied_products_data" class="panel woocommerce_options_panel wc-metaboxes-wrapper">
@@ -385,6 +452,34 @@ class WC_Product_Dependencies {
 
 				?>
 			</p>
+			<!-- category selection -->
+			<p class="form-field">
+				<label> <?php _e( 'Category Dependencies', 'woocommerce-product-dependencies' ); ?>
+				</label>
+				<select name="tied_categories[]" id="tied_categories" multiple>
+					<?php
+					 foreach ($category_list as $category)
+					{
+						$selected = "";
+						if(in_array($category["id"], $tied_categories))
+						{
+							$selected = "selected";
+						}
+						echo "<option value='" .$category["id"] . "' ". $selected ."> " . $category["name"] . "</option>";
+						$sub_categories = $category_list->sub_cats;
+						foreach ($sub_categories as $sub_cat) {
+							$sub_selected = "";
+							if(in_array($sub_cat["id"], $tied_categories))
+							{
+								$sub_selected = "selected";
+							}
+							echo "<option value='" .$sub_cat["id"] . "' ". $sub_selected ."> " . $sub_cat["name"] . "</option>";
+						}
+					} ?>
+				</select>
+			</p>
+			<?php echo $tied_categories ; var_dump($tied_categories);?>
+
 			<p class="form-field">
 				<label><?php _e( 'Dependency Type', 'woocommerce-product-dependencies' ); ?>
 				</label>
@@ -405,6 +500,13 @@ class WC_Product_Dependencies {
 	 * @return void
 	 */
 	public function process_product_data( $product ) {
+
+		$product->delete_meta_data( '_tied_categories' );
+
+		if( isset($_POST["tied_categories"]))
+		{
+			$product->add_meta_data( "_tied_categories", $_POST["tied_categories"]);
+		}
 
 		if ( ! isset( $_POST[ 'tied_products' ] ) || empty( $_POST[ 'tied_products' ] ) ) {
 
@@ -438,6 +540,11 @@ class WC_Product_Dependencies {
 	public function process_meta( $post_id, $post ) {
 
 		global $post;
+
+		if( isset($_POST["tied_categories"]))
+		{
+			update_post_meta($post_id, "_tied_categories", $_POST["tied_categories"]);
+		}
 
 		if ( ! isset( $_POST[ 'tied_products' ] ) || empty( $_POST[ 'tied_products' ] ) ) {
 

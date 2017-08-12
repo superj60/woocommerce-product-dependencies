@@ -19,10 +19,14 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class WC_PD_Helpers {
 
-	public static function merge_product_titles( $products ) {
+	public static function merge_product_titles( $products, $categories ) {
 
 		$parts_to_merge = array();
-
+		if ( ! empty( $categories ) )
+		{
+			//we have categories
+			$have_categories = true;
+		}
 		if ( ! empty( $products ) ) {
 
 			$loop = 0;
@@ -31,7 +35,7 @@ class WC_PD_Helpers {
 
 				if ( $loop === 0 ) {
 					$part_to_merge = __( '%s', 'woocommerce-product-dependencies' );
-				} elseif ( count( $products ) - 1 === $loop ) {
+				} elseif ( count( $products ) - 1 === $loop && $have_categories != true) {
 					$part_to_merge = __( ' or %s', 'woocommerce-product-dependencies' );
 				} else {
 					$part_to_merge = __( ', %s', 'woocommerce-product-dependencies' );
@@ -51,7 +55,34 @@ class WC_PD_Helpers {
 				$loop++;
 			}
 		}
+		if( $have_categories )
+		{
+			// we need to list the categories
 
+			foreach ( $categories as $index => $category ) {
+				$term = get_term_by( 'id', $category, 'product_cat', 'ARRAY_A' );
+				$name = $term["name"];
+				$link = get_term_link( intval( $category ) ,'product_cat');
+				if( count( $parts_to_merge ) == 0 )
+				{
+					if(count($categories) == 1)
+					{
+						$part_to_merge = __( 'products from the %s category', 'woocommerce-product-dependencies' );
+					}
+					else{
+						$part_to_merge = __( 'products from the %s', 'woocommerce-product-dependencies' );
+					}
+				}
+				elseif ( count( $categories ) == $index + 1) {
+					$part_to_merge = __( ' or %s categories', 'woocommerce-product-dependencies' );
+				}
+				else {
+					$part_to_merge = __( ', %s', 'woocommerce-product-dependencies' );
+				}
+				$part_to_merge = sprintf( $part_to_merge, sprintf( '&quot;<a href="%1$s">%2$s</a>&quot;', esc_url( $link ), $name ) );
+				$parts_to_merge[] = $part_to_merge;
+			}
+		}
 		if ( is_rtl() ) {
 			$parts_to_merge = array_reverse( $parts_to_merge );
 		}
